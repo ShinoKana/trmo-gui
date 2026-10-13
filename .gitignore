@@ -1,0 +1,9 @@
+__pycache__/
+*.pyc
+moke_data/
+moke_gui.log
+moke_gui_settings.json
+moke_gui_config.json
+_pypackages/
+*.bak
+.DS_Store

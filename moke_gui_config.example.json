@@ -1,0 +1,12 @@
+{
+  "_comment": "Per-lab device config. RENAME this file to 'moke_gui_config.json' (next to moke_gui.py) and edit the values for your instruments. Any key present here overrides the built-in default; delete keys you don't need to change. Then just launch the app.",
+  "shot602_port": "COM5",
+  "shot602_baud": 9600,
+  "lockin_addr": "GPIB0::12::INSTR",
+  "lockin_model": "LI5645",
+  "bbd_serial": "10000000",
+  "bbd_counts_per_mm": 20000,
+  "pulses_per_mm": 500,
+  "x_axis": 1,
+  "z_axis": 2
+}
