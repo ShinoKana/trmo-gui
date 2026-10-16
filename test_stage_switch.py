@@ -65,7 +65,7 @@ def run1(app):
     app.stage_sel_var.set(NAMES[2]); app._on_stage_selected()
     import time as _t, queue as _q
     t0 = _t.time(); seen = False
-    while _t.time() - t0 < 10 and not seen:          # the swap runs in a thread; drain its messages
+    while _t.time() - t0 < 30 and not seen:          # the swap runs in a thread; drain its messages (30 s: the first pylablib import can take ~10 s on a slow PC)
         try:
             m = app.out_q.get(timeout=0.2)
         except _q.Empty:

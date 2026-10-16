@@ -2,6 +2,10 @@
 
 The version is shown in the window title.
 
+## 2.0.1
+- Fix: a delay line remembers only a scan range that fits its own travel and was set on it. Before, numbers typed for another delay line (or carried over on first use) could be saved as its own, together with t0.
+- "Device Not Opened" on Connect now says the delay line is open in another program, instead of asking to check USB / power.
+
 ## 2.0
 - Each delay line keeps its own Start / End / Step and lock-in TC / Sens; switching brings them back (press Set to apply TC / Sens).
 - The travel of the selected delay line is shown under the scan fields; Start / End turn red as soon as the range leaves it.

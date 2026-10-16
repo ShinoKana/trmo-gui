@@ -184,7 +184,7 @@ def hook3(app):
         app.stage_sel_var.set(names[1]); app._on_stage_selected()
         import time as _t, queue as _q
         t0 = _t.time(); got = None
-        while _t.time() - t0 < 10 and got is None:
+        while _t.time() - t0 < 30 and got is None:   # 30 s: the first pylablib import alone can take ~10 s on a slow PC
             try:
                 m = app.out_q.get(timeout=0.2)
             except _q.Empty:

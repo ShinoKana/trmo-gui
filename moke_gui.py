@@ -55,7 +55,7 @@ SENS_RANGES = [
     ("500 nV", 5e-7), ("200 nV", 2e-7), ("100 nV", 1e-7), ("50 nV", 5e-8), ("20 nV", 2e-8), ("10 nV", 1e-8),
 ]
 SETTINGS_VERSION = 4   # 4 = physical delay again (t0 at overlap, reverse); see _migrate_settings
-__version__ = "2.0"    # shown in the title bar; see CHANGELOG.md
+__version__ = "2.0.1"  # shown in the title bar; see CHANGELOG.md
 
 # ---- Delay lines on this rig (2026-10-07) -------------------------------------------------
 # Read from C:\ProgramData\Thorlabs\MotionControl\ThorlabsDeviceConfiguration.xml and the
@@ -1041,6 +1041,7 @@ def run_app(smoke=False, test_hook=None):
             self._last_pos_mm = None   # last known delay-line position, for re-labelling
             self.stages = []            # delay-line profiles (see STAGE_KEYS / DEFAULT_STAGES)
             self.active_stage = None
+            self._carried = {}          # stage -> Start/End/Step left over from the previous stage (first use)
             self._saved_stages = None
             self._saved_active = None
 
@@ -1775,6 +1776,13 @@ def run_app(smoke=False, test_hook=None):
                 messagebox.showwarning(names[key], self._plain_error(st) + "\n\n" + self._conn_hint(key)
                                        + "\n\n(details: " + st[:160] + ")")
 
+        def _bbd_fail_line(self, st):
+            """Connect line for a delay line that failed to open. 'Device Not Opened' = it is open in
+            another program (e.g. while LabVIEW or another window holds it)."""
+            why = (self._plain_error(st) if "Device Not Opened" in st
+                   else f"is serial {self.config_data.get('bbd_serial')} plugged in (USB + power)?")
+            return f"Main delay line ({self.config_data.get('stage_name', '?').split(' (')[0]}):   ⚠  {st}   — {why}"
+
         @staticmethod
         def _plain_error(st):
             t = str(st)
@@ -1828,8 +1836,7 @@ def run_app(smoke=False, test_hook=None):
                     except Exception as e:
                         lines.append(f"BBD delay:   OK  (pos read failed: {e})")
                 elif status["bbd"].startswith("FAILED"):
-                    lines.append(f"Main delay line ({self.config_data.get('stage_name', '?').split(' (')[0]}):   ⚠  {status['bbd']}"
-                                 f"   — is serial {self.config_data.get('bbd_serial')} plugged in (USB + power)?")
+                    lines.append(self._bbd_fail_line(status["bbd"]))
                 lockin_idn = ""
                 if status["lockin"] == "ok":
                     try:
@@ -3390,21 +3397,47 @@ def run_app(smoke=False, test_hook=None):
             return next((p for p in self.stages if p["name"] == self.active_stage), None)
 
         def _store_active_stage(self):
-            """Copy the live calibration (config_data) back into the active profile."""
+            """Copy the live calibration (config_data) back into the active profile.
+
+            The scan range (and, in µm mode, t0 = the Start box) is kept only if it was set on THIS
+            delay line and fits its travel. Otherwise numbers meant for another delay line overwrite
+            this one's (e.g. a Start typed for a long delay line, saved on a shorter one that cannot reach it)."""
             p = self._active_profile()
             if p is None:
                 return
             old_t0 = p.get("bbd_t0_mm")
+            keep = self._scan_range_belongs_here()
             for k in STAGE_KEYS:
+                if k == "bbd_t0_mm" and not keep and self.ts_unit.get() != "ps":
+                    continue                 # t0 is just that foreign Start box
                 if k in self.config_data:
                     p[k] = copy.deepcopy(self.config_data[k])
             if old_t0 is not None and abs(float(p["bbd_t0_mm"]) - float(old_t0)) > 1e-9:
                 p["calibrated"] = True       # t0 was set on this stage
-            if hasattr(self, "ts_vars") and hasattr(self, "ts_unit"):   # each stage keeps its own scan range
+            if keep and hasattr(self, "ts_vars") and hasattr(self, "ts_unit"):   # each stage keeps its own scan range
                 p["scan"] = {k: self.ts_vars[k].get() for k in ("time_start_ps", "time_end_ps", "time_step_ps")}
                 p["scan"]["unit"] = self.ts_unit.get()
             if hasattr(self, "tc_var") and hasattr(self, "sens_var"):   # each system keeps its lock-in settings
                 p["lockin"] = {"tc": self.tc_var.get(), "sens": self.sens_var.get()}
+
+        def _scan_snapshot(self):
+            return tuple(self.ts_vars[k].get() for k in ("time_start_ps", "time_end_ps", "time_step_ps")) \
+                + (self.ts_unit.get(),)
+
+        def _scan_range_belongs_here(self):
+            """True if the Start/End/Step boxes may be remembered for the active delay line."""
+            if not (hasattr(self, "ts_vars") and hasattr(self, "ts_unit")):
+                return True                  # still building the window: nothing typed yet
+            if self._carried.get(self.active_stage) == self._scan_snapshot():
+                return False                 # first use, untouched: the previous delay line's numbers
+            try:
+                cfg = dict(self.config_data)
+                s, e = float(self.ts_vars["time_start_ps"].get()), float(self.ts_vars["time_end_ps"].get())
+                st = float(self.ts_vars["time_step_ps"].get()) or 1.0
+                cfg["bbd_t0_mm"], sp, ep, _ = plan_timescan(cfg, self.ts_unit.get(), s, e, st)
+                return timescan_out_of_travel(cfg, sp, ep) is None
+            except (ValueError, KeyError, TypeError):
+                return False                 # half-typed: keep the last good range
 
         def _load_stage_into_config(self, p):
             if p is None:
@@ -3595,8 +3628,10 @@ def run_app(smoke=False, test_hook=None):
             except Exception:
                 pass
             if self._restore_scan_range(p):
+                self._carried.pop(name, None)
                 name_msg = " Its last scan range is back in 'Scan'."
             else:
+                self._carried[name] = self._scan_snapshot()
                 name_msg = " First use: set Start/End inside its travel (or 'Start = here')."
             lk = p.get("lockin") or {}
             if lk.get("tc"):
